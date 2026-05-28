@@ -1,11 +1,11 @@
 import sys
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
-import pandas as pd
+from tkinter import filedialog, messagebox
 import numpy as np
 import os
 import datetime
-import tempfile
+
+from src.data_loader import merge_measurement_files, write_merged_excel
 
 # Plotting settings
 import matplotlib
@@ -21,7 +21,6 @@ try:
     # Excel Constants
     xlXYScatterSmooth = 72
     xlTickMarkInside = 4
-    xlSolid = 1
     xlCategory = 1
     xlValue = 2
     xlLegendPositionTop = -4160
@@ -33,7 +32,23 @@ except ImportError:
 # Font setup for Matplotlib (English/Standard)
 plt.rcParams['font.family'] = 'Arial' 
 
-print("FET Universal Viewer (Bilingual Final) Starting...")
+print("FET Universal Viewer Starting...")
+
+
+def axis_bounds(values):
+    finite_values = np.asarray(values, dtype=float)
+    finite_values = finite_values[np.isfinite(finite_values)]
+    if finite_values.size == 0:
+        return 0.0, 1.0
+
+    min_value = float(np.min(finite_values))
+    max_value = float(np.max(finite_values))
+    if min_value == max_value:
+        padding = abs(min_value) * 0.05 or 1.0
+        return min_value - padding, max_value + padding
+
+    return min_value, max_value
+
 
 class FET_Bilingual_Grapher(tk.Tk):
     def __init__(self):
@@ -58,7 +73,7 @@ class FET_Bilingual_Grapher(tk.Tk):
 
         # 1. Batch Load
         self.add_lbl(control, "1. Import & Merge")
-        tk.Button(control, text="📂 Select Files & Merge", command=self.load_batch_files, 
+        tk.Button(control, text="Select Files & Merge", command=self.load_batch_files,
                   bg='white', relief='groove', font=("Arial", 10, "bold")).pack(fill='x', pady=5)
         
         self.lbl_status = tk.Label(control, text="Ready", bg='#f5f5f5', fg='blue', wraplength=350)
@@ -85,13 +100,13 @@ class FET_Bilingual_Grapher(tk.Tk):
         # 4. Settings
         self.add_lbl(control, "4. Settings")
         self.is_log = tk.BooleanVar(value=False)
-        tk.Checkbutton(control, text="Log Scale (Y-axis)", variable=self.is_log, bg='#f5f5f5').pack(anchor='w')
+        tk.Checkbutton(control, text="Log Scale (|Y-axis|)", variable=self.is_log, bg='#f5f5f5').pack(anchor='w')
 
         # Run Buttons
-        tk.Button(control, text="📊 Preview (Python)", command=self.plot_graph, 
+        tk.Button(control, text="Preview (Python)", command=self.plot_graph,
                   bg='#e6f2ff', font=("Arial", 11, "bold")).pack(fill='x', pady=10)
 
-        tk.Button(control, text="📉 Create Excel Graphs (Jpn Legend)", command=self.create_native_excel_charts, 
+        tk.Button(control, text="Create Excel Graphs (Japanese Legend)", command=self.create_native_excel_charts,
                   bg='#ffebd0', fg='#d35400', font=("Arial", 11, "bold")).pack(fill='x', pady=5)
 
         self.txt_info = tk.Text(control, height=12, width=40)
@@ -118,10 +133,6 @@ class FET_Bilingual_Grapher(tk.Tk):
 
     # --- 1. File Load & Merge ---
     def load_batch_files(self):
-        if win32 is None:
-            messagebox.showerror("Error", "pywin32 library is missing.")
-            return
-
         ft = [("Data Files", "*.Dat *.csv *.txt"), ("All Files", "*.*")]
         file_paths = filedialog.askopenfilenames(filetypes=ft)
         if not file_paths: return
@@ -132,87 +143,25 @@ class FET_Bilingual_Grapher(tk.Tk):
 
         self.lbl_status.config(text="Processing...", fg="blue")
         self.update()
-
-        excel = None
-        all_dfs = []
-        sys_temp_dir = tempfile.gettempdir()
         
         try:
-            excel = win32.Dispatch('Excel.Application')
-            excel.Visible = False
-            excel.DisplayAlerts = False
-
-            c_vsd = self.ent_vsd.get().strip()
-            c_vbg = self.ent_vbg.get().strip()
-            c_isd = self.ent_isd.get().strip()
-
-            processed_count = 0
-            
-            for i, path in enumerate(file_paths):
-                self.lbl_status.config(text=f"Reading ({i+1}/{len(file_paths)})", fg="blue")
-                self.update()
-                
-                abs_path = os.path.abspath(path).replace('/', '\\')
-                wb = excel.Workbooks.Open(abs_path)
-                ws = wb.Sheets(1)
-
-                row1_vals = ""
-                try:
-                    vals = [str(ws.Cells(1, c).Value) for c in range(1, 11)]
-                    row1_vals = " ".join(vals).lower()
-                except: pass
-                
-                keywords = ["isd", "vsd", "vbg", "no.", "id", "vg", "vd"]
-                if not any(k in row1_vals for k in keywords):
-                    ws.Rows(1).Insert()
-                    # Headers (English for App compatibility)
-                    headers = ["No.", "Temp", "Mag", "Isd", "Vsd", "Vbg"]
-                    for c, h in enumerate(headers, 1):
-                        ws.Cells(1, c).Value = h
-                
-                temp_name = f"fet_tmp_{now_str}_{i}.xlsx"
-                temp_path = os.path.join(sys_temp_dir, temp_name).replace('/', '\\')
-                wb.SaveAs(temp_path, FileFormat=51)
-                wb.Close(SaveChanges=False)
-
-                df_temp = pd.read_excel(temp_path)
-                df_temp.columns = df_temp.columns.str.strip()
-                
-                for col in [c_vsd, c_vbg, c_isd]:
-                    if col in df_temp.columns:
-                        df_temp[col] = pd.to_numeric(df_temp[col], errors='coerce')
-                
-                if {c_vsd, c_vbg, c_isd}.issubset(df_temp.columns):
-                    df_temp = df_temp.dropna(subset=[c_vsd, c_vbg, c_isd])
-                    df_temp['_Sort_ID'] = i * 1000000 + np.arange(len(df_temp))
-                    all_dfs.append(df_temp)
-                    processed_count += 1
-                
-                try: os.remove(temp_path)
-                except: pass
-
-            if not all_dfs:
-                messagebox.showerror("Error", "No valid data found.")
-                return
-
-            self.lbl_status.config(text="Merging Excel...", fg="orange")
+            result = merge_measurement_files(file_paths)
+            self.lbl_status.config(text="Writing Excel workbook...", fg="orange")
             self.update()
+            write_merged_excel(result, self.last_saved_path)
 
-            with pd.ExcelWriter(self.last_saved_path, engine='openpyxl') as writer:
-                current_col = 0
-                for df in all_dfs:
-                    export_df = df.drop(columns=['_Sort_ID'], errors='ignore')
-                    export_df.to_excel(writer, sheet_name='Raw_Data', startcol=current_col, index=False)
-                    current_col += len(export_df.columns) + 1
-
-            self.df = pd.concat(all_dfs, ignore_index=True)
+            self.df = result.dataframe
             self.lbl_status.config(text="Success!", fg="green")
-            
-            self.df['Vsd_R'] = self.df[c_vsd].round(2)
-            self.df['Vbg_R'] = self.df[c_vbg].round(2)
+
+            self.ent_vsd.delete(0, tk.END)
+            self.ent_vsd.insert(0, "Vsd")
+            self.ent_vbg.delete(0, tk.END)
+            self.ent_vbg.insert(0, "Vbg")
+            self.ent_isd.delete(0, tk.END)
+            self.ent_isd.insert(0, "Isd")
             
             info = f"Merged: {os.path.basename(self.last_saved_path)}\n\n"
-            info += f"Files: {processed_count}\nTotal Points: {len(self.df)}"
+            info += f"Files: {result.processed_count}\nTotal Points: {len(self.df)}"
             self.txt_info.delete(1.0, tk.END)
             self.txt_info.insert(tk.END, info)
             messagebox.showinfo("Success", f"Merged Excel created!\nNext: Click 'Create Excel Graphs'")
@@ -220,8 +169,6 @@ class FET_Bilingual_Grapher(tk.Tk):
         except Exception as e:
             messagebox.showerror("Error", str(e))
             self.lbl_status.config(text="Error")
-        finally:
-            if excel: excel.Quit()
 
     # --- 2. Create Native Excel Charts (Japanese Legend) ---
     def create_native_excel_charts(self):
@@ -250,7 +197,7 @@ class FET_Bilingual_Grapher(tk.Tk):
             orig = c_vbg if ptype == "output" else c_vsd
             self.df[grp_col_R] = self.df[orig].round(2)
         
-        groups = sorted(self.df[grp_col_R].unique())
+        groups = sorted(self.df[grp_col_R].dropna().unique())
 
         self.lbl_status.config(text="Opening Excel...", fg="blue")
         self.update()
@@ -346,7 +293,7 @@ class FET_Bilingual_Grapher(tk.Tk):
                     if len1 > 1: add_series_xl("逆掃引", range_x1, range_y1, COLOR_ORANGE_XL)
                     if (data_len - split_idx) > 1: add_series_xl("順掃引", range_x2, range_y2, COLOR_BLUE_XL)
 
-                # Styling (Axes at -200)
+                # Styling
                 try:
                     chart.Axes(xlCategory).HasMajorGridlines = False
                     chart.Axes(xlValue).HasMajorGridlines = False
@@ -357,14 +304,16 @@ class FET_Bilingual_Grapher(tk.Tk):
                 chart.Axes(xlCategory).Format.Line.ForeColor.RGB = 0
                 chart.Axes(xlValue).Format.Line.ForeColor.RGB = 0 
 
-                x_min = np.min(x_vals)
-                x_max = np.max(x_vals)
+                x_min, x_max = axis_bounds(x_vals)
+                y_min, y_max = axis_bounds(y_vals)
                 chart.Axes(xlCategory).MinimumScale = x_min
                 chart.Axes(xlCategory).MaximumScale = x_max
+                chart.Axes(xlValue).MinimumScale = y_min
+                chart.Axes(xlValue).MaximumScale = y_max
                 
-                # Axis Crosses at -200
-                chart.Axes(xlCategory).CrossesAt = -200 
-                chart.Axes(xlValue).CrossesAt = -200
+                # Keep axes on the lower-left chart frame instead of a hard-coded value.
+                chart.Axes(xlCategory).CrossesAt = y_min
+                chart.Axes(xlValue).CrossesAt = x_min
 
                 chart.Axes(xlValue).TickLabels.NumberFormat = "0.00E+00"
                 chart.Axes(xlCategory).TickLabels.NumberFormat = "General"
@@ -402,6 +351,7 @@ class FET_Bilingual_Grapher(tk.Tk):
 
         self.ax.clear()
         ptype = self.plot_type.get()
+        log_mode = self.is_log.get()
         
         if ptype == "output":
             self.ax.set_title("Output Characteristics ($I_{sd} - V_{sd}$)")
@@ -416,7 +366,9 @@ class FET_Bilingual_Grapher(tk.Tk):
             x_col, y_col, group_col_R = c_vbg, c_isd, 'Vsd_R'
             legend_title = "Vsd"
 
-        if self.is_log.get(): self.ax.set_yscale('log')
+        if log_mode:
+            self.ax.set_ylabel(f"|{c_isd}| (A)")
+            self.ax.set_yscale('log')
         else:
             self.ax.yaxis.set_major_formatter(ticker.FormatStrFormatter('%.2E'))
             self.ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=10, prune=None))
@@ -427,10 +379,10 @@ class FET_Bilingual_Grapher(tk.Tk):
             orig = c_vbg if ptype == "output" else c_vsd
             self.df[group_col_R] = self.df[orig].round(2)
 
-        groups = sorted(self.df[group_col_R].unique())
+        groups = sorted(self.df[group_col_R].dropna().unique())
         
-        # Colormap for different groups (Multi-Color)
-        colors = cm.jet(np.linspace(0, 1, len(groups)))
+        # Colormap for different groups.
+        colors = cm.viridis(np.linspace(0, 1, len(groups)))
 
         for i, val in enumerate(groups):
             subset = self.df[self.df[group_col_R] == val].sort_values(by='_Sort_ID')
@@ -438,6 +390,9 @@ class FET_Bilingual_Grapher(tk.Tk):
 
             x_vals = subset[x_col].values
             y_vals = subset[y_col].values
+            if log_mode:
+                y_vals = np.abs(y_vals.astype(float))
+                y_vals[y_vals <= 0] = np.nan
 
             split_idx = np.argmax(x_vals)
             if split_idx == 0 or split_idx == len(x_vals)-1:

@@ -1,40 +1,89 @@
 # FET Universal Viewer
 
-**FET（電界効果トランジスタ）の測定データ解析・グラフ化自動化ツール**
+FET（電界効果トランジスタ）の測定データを一括で読み込み、Excelブックへの統合とグラフ作成を支援するデスクトップアプリです。
 
-研究室での実験データを「一括で読み込み」「整理してExcelに結合」「論文品質のグラフを自動生成」までワンストップで行うPythonアプリケーションです。
+研究室で発生する `.Dat` / `.txt` / `.csv` 形式の測定ファイルを、手作業で整形してから作図する負担を減らすことを目的にしています。Pythonでデータを正規化し、プレビューで傾向を確認したうえで、Excel上で編集できるグラフを出力できます。
 
-![App Screenshot](images/demo.png) ## 🚀 主な機能 (Features)
+## このリポジトリで示すこと
 
-* **データ一括処理 (Batch Processing)**
-    * 複数の測定データ（`.Dat`, `.txt`, `.csv`）を一度に選択し、1つのExcelファイルに結合します。
-    * ファイル間に空白列を自動挿入し、視認性を高めます。
-    * ヘッダーがないファイルには自動で列名（No., Temp, Mag, Isd, Vsd, Vbg）を補完します。
+- 実験装置由来のタブ区切りデータを読み込み、列名ゆれや不要列を補正する処理
+- 複数ファイルをまとめてExcelブックへ出力するバッチ処理
+- FETの出力特性・伝達特性を切り替えて確認できるGUI
+- 掃引方向を分けて可視化するヒステリシス確認用のプロット
+- Windows + Microsoft Excel環境で、Excel編集可能な散布図を自動生成する処理
 
-* **Excelグラフ完全自動化 (Native Excel Charting)**
-    * Pythonで画像を作るのではなく、**Excelの機能（散布図）を使ってグラフを自動生成**します。
-    * 生成後のグラフはExcel上で自由に編集可能です。
+## 主な機能
 
-* **ヒステリシス解析 (Hysteresis Analysis)**
-    * **順掃引 (Forward)** と **逆掃引 (Reverse)** を自動判定。
-    * **青色（行き）** と **オレンジ色（帰り）** に色分けしてプロットします。
+- 複数の `.Dat` / `.txt` / `.csv` ファイルを一括読み込み
+- `温度` / `磁場` などの日本語ヘッダーを `Temp` / `Mag` に正規化
+- 必須列 `Isd` / `Vsd` / `Vbg` を数値化し、欠損値やオーバーフロー表記を除外
+- `Output Characteristics (Isd - Vsd)` と `Transfer Characteristics (Isd - Vbg)` のプレビュー
+- 線形スケールと `|Isd|` のログスケール表示
+- Excelブックに `Merged_Data` と `Raw_Data` シートを出力
+- Excel COM Automationによる編集可能なグラフ作成
 
-* **論文仕様のデザイン (Publication-Ready Design)**
-    * **内向き目盛り (Inside Ticks)**
-    * **指数表記 (Scientific Notation)**
-    * **枠線のみ・グリッドなし (Box Style, No Grid)**
-    * 横軸・縦軸の交点をグラフ枠の端に固定。
+## 動作環境
 
-* **強力なデータクリーニング**
-    * 測定器特有のオーバーフロー表記（`#######`）や文字化けを自動で除去・修復して読み込みます。
+- Python 3.10以降
+- Windows
+- Microsoft Excel（Excelグラフ自動生成を使う場合）
 
-## 🛠 動作要件 (Requirements)
+PythonプレビューとExcelブック出力はPythonだけで動作します。Excelグラフ自動生成のみ、Windows版Microsoft Excelと `pywin32` が必要です。
 
-Windows環境（Excelがインストールされていること）が必要です。
+## セットアップ
 
-* Python 3.x
-* Microsoft Excel
-
-### 必要なライブラリ
 ```bash
-pip install pandas numpy matplotlib openpyxl pywin32
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+## 使い方
+
+```bash
+python FET-Universal-Viewer.py
+```
+
+1. `Select Files & Merge` から測定データを複数選択します。
+2. 統合されたExcelブックが、選択したデータと同じフォルダに作成されます。
+3. `Preview (Python)` でグラフを確認します。
+4. 必要に応じて `Create Excel Graphs (Japanese Legend)` でExcel上に編集可能なグラフを作成します。
+
+## サンプルデータ
+
+`sample_data/` に動作確認用の `.Dat` ファイルを同梱しています。これらは実際のFET測定ファイルと同じ形式のサンプルとして、読み込み処理とテストで使用します。
+
+想定する主要列は次の通りです。
+
+| Column | Meaning |
+| --- | --- |
+| `No.` | 測定点番号 |
+| `Temp` | 温度 |
+| `Mag` | 磁場 |
+| `Isd` | ソース-ドレイン電流 |
+| `Vsd` | ソース-ドレイン電圧 |
+| `Vbg` | バックゲート電圧 |
+
+## テスト
+
+```bash
+python -m unittest discover
+```
+
+テストでは `sample_data/*.Dat` を読み込み、列名の正規化、数値変換、複数ファイルの結合、Excel出力を確認します。
+
+## 構成
+
+```text
+FET-Universal-Viewer.py      # Tkinter GUI entry point
+FET-Universal-Viewer.ipynb   # Data loader demo notebook
+src/data_loader.py           # Dat/csv/txt reader and Excel export utilities
+sample_data/                 # Example Dat files for tests and demos
+tests/test_data_loader.py    # Regression tests for the data loader
+requirements.txt             # Runtime dependencies
+LICENSE                      # MIT License
+```
+
+## ライセンス
+
+MIT License
