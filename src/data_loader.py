@@ -120,7 +120,7 @@ def _read_table(path: Path, has_header: bool) -> pd.DataFrame:
     encoding_errors: list[str] = []
 
     for encoding in ("utf-8-sig", "cp932", "shift_jis"):
-        for sep in (None, r"\s+"):
+        for sep in ("\t", ",", None, r"\s+"):
             try:
                 df = pd.read_csv(
                     path,
@@ -128,6 +128,7 @@ def _read_table(path: Path, has_header: bool) -> pd.DataFrame:
                     engine="python",
                     header=header,
                     encoding=encoding,
+                    index_col=False,
                 )
                 if len(df.columns) > 1:
                     return df
@@ -168,9 +169,23 @@ def _clean_measurement_values(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df = df.replace({"#######": np.nan, "########": np.nan, "OVER": np.nan, "Overflow": np.nan})
 
-    numeric_columns = [col for col in [*DEFAULT_COLUMNS, *REQUIRED_COLUMNS] if col in df.columns]
+    extra_columns = [col for col in df.columns if str(col).startswith("Extra_")]
+    numeric_columns = [
+        col
+        for col in [*DEFAULT_COLUMNS, *REQUIRED_COLUMNS, *extra_columns]
+        if col in df.columns
+    ]
     for col in dict.fromkeys(numeric_columns):
         df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    if "Isd" in df.columns and df["Isd"].isna().all():
+        for col in reversed(extra_columns):
+            if df[col].notna().any():
+                df["Isd"] = df[col]
+                break
+
+    if extra_columns:
+        df = df.drop(columns=extra_columns)
 
     return df
 

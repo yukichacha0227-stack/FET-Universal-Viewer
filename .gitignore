@@ -8,5 +8,6 @@ __pycache__/
 venv/
 
 Merged_*.xlsx
+verification_outputs/
 ~$*.xlsx
 .DS_Store

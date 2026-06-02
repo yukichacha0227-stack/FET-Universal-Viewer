@@ -36,6 +36,15 @@ class DataLoaderTest(unittest.TestCase):
             write_merged_excel(result, output_path)
             self.assertTrue(output_path.exists())
 
+    def test_all_sample_files_have_valid_rows(self):
+        self.assertTrue(SAMPLE_FILES, "sample_data/*.Dat is required for this test")
+
+        result = merge_measurement_files(SAMPLE_FILES)
+
+        self.assertEqual(result.processed_count, len(SAMPLE_FILES))
+        self.assertEqual(len(result.dataframe), 378)
+        self.assertFalse(result.dataframe[["Isd", "Vsd", "Vbg"]].isna().any().any())
+
 
 if __name__ == "__main__":
     unittest.main()
